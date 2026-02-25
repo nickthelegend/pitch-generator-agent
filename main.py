@@ -95,8 +95,15 @@ async def execute_crew_task(input_data: str) -> str:
         for slide in slides:
             if slide.speakerNotes:
                 script = [{"speaker": "Presenter", "line": slide.speakerNotes}]
-                audio_b64 = generate_tts(script, language="en-US")
+                tts_response = generate_tts(script, language="en-US")
+                audio_b64 = tts_response.get("audio", "")
                 slide.audioUrl = f"data:audio/mp3;base64,{audio_b64}"
+                
+                # Calculate duration based on word count with natural pause buffer
+                word_count = len(slide.speakerNotes.split())
+                base_duration = word_count / 2.2
+                pause_buffer = 1.5
+                slide.duration = max(5.0, base_duration + pause_buffer)
                 
         # 4. Save directly into Podio AI database for Remotion playback
         import uuid
