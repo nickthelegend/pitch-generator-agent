@@ -1,0 +1,11 @@
+.venv
+.venv312
+__pycache__
+*.pyc
+*.pyo
+outputs/
+.git
+.gitignore
+.env
+google-credentials.json
+.DS_Store
