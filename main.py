@@ -19,9 +19,7 @@ from schemas import (
     VideoRenderResponse,
 )
 from slide_generation import generate_slides, update_slide
-from tts_generation import generate_tts, TTSGenerationError
-from video_generation import render_video, VideoGenerationError
-from pinata_client import upload_file as pinata_upload, PinataError
+from podio_client import generate_tts
 
 # Configure logging
 logger = setup_logging()
@@ -83,19 +81,11 @@ class ProvideInputRequest(BaseModel):
 # CrewAI Task Execution
 # ─────────────────────────────────────────────────────────────────────────────
 async def execute_crew_task(input_data: str) -> str:
-    """ Execute a CrewAI task to research, generate slides, create audio, render video, and return its IPFS link """
-    logger.info(f"Starting CrewAI task with input: {input_data}")
+    """ Execute the multimedia generation pipeline (Slides, Audio, Video, IPFS) without CrewAI """
+    logger.info(f"Starting execution with input: {input_data}")
     
-    # 1. CrewAI Research
-    crew = ResearchCrew(logger=logger)
-    inputs = {"text": input_data}
-    result = crew.crew.kickoff(inputs)
-    research_summary = result.raw if hasattr(result, "raw") else str(result)
-    logger.info("CrewAI task completed successfully. Beginning multimedia generation...")
-
     try:
-        # 2. Generate Slides
-        # We use the original user input as the topic, guided by the research summary
+        # 1. Generate Slides (Using Podio directly from User Input)
         topic = input_data.strip()
         logger.info(f"Generating slides for topic: {topic}")
         slides = generate_slides(topic=topic, count=5, style="Modern")
@@ -108,33 +98,47 @@ async def execute_crew_task(input_data: str) -> str:
                 audio_b64 = generate_tts(script, language="en-US")
                 slide.audioUrl = f"data:audio/mp3;base64,{audio_b64}"
                 
-        # 4. Render Video
-        logger.info("Rendering final presentation video...")
-        output_dir = os.getenv("MEDIA_DIR", os.path.join(os.getcwd(), "outputs"))
-        video_path, filename = render_video(
-            topic=topic,
-            slides=slides,
-            output_dir=output_dir,
-            format="16:9",
-            fps=30,
-            output_format="mp4",
-            generate_audio=False # Audio already generated manually above
+        # 4. Save directly into Podio AI database for Remotion playback
+        import uuid
+        from podio_client import save_project
+        project_id = str(uuid.uuid4())
+        
+        logger.info(f"Saving project {project_id} directly to Podio AI...")
+        slides_dict_list = [s.model_dump() for s in slides]
+        try:
+            save_project(project_id, topic, slides_dict_list, has_video=True)
+        except Exception as e:
+            logger.warning(f"Failed to save directly to Next.js API (you may need to restart your npm run dev process): {e}")
+        
+        # 5. Render Video using Remotion and Upload to IPFS via Pinata
+        from pinata_client import upload_file as pinata_upload
+        from render_remotion import render_remotion_video
+        
+        logger.info("Rendering Remotion video locally...")
+        try:
+            video_path = render_remotion_video(slides_dict_list, project_id)
+            logger.info("Uploading rendered video to IPFS via Pinata...")
+            ipfs_data = pinata_upload(video_path)
+            ipfs_url = ipfs_data.get("ipfsUrl", "Generation completed, but IPFS missing.")
+        except Exception as video_err:
+            logger.warning(f"Could not render/upload video to Pinata. Error: {video_err}")
+            ipfs_url = f"Failed to render/upload to Pinata: {video_err}"
+        
+        # 6. Return Deep Link & IPFS Link
+        podio_base = os.getenv("PODIO_AI_BASE_URL", "http://localhost:3002")
+        export_url = f"{podio_base}/project/{project_id}/export"
+        
+        final_output = (
+            f"Presentation Generated Successfully!\n"
+            f"View and Export your Remotion Video here: {export_url}\n"
+            f"IPFS Backup URL (Pinata): {ipfs_url}"
         )
-        logger.info(f"Video rendered successfully to {video_path}")
-        
-        # 5. Upload to IPFS via Pinata
-        logger.info("Uploading video to IPFS via Pinata...")
-        ipfs_data = pinata_upload(video_path, name=filename)
-        ipfs_url = ipfs_data.get("ipfsUrl", "Generation completed, but IPFS missing.")
-        
-        # 6. Return final summary and IPFS video URL
-        final_output = f"Research Summary:\n{research_summary}\n\nFinal Presentation Video:\n{ipfs_url}"
         logger.info("Multimedia pipeline completed.")
         return final_output
 
     except Exception as e:
         logger.error(f"Error during multimedia generation: {str(e)}", exc_info=True)
-        return f"Research Summary:\n{research_summary}\n\n(Error generating video presentation: {str(e)})"
+        return f"Error generating video presentation: {str(e)}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1) Start Job (MIP-003: /start_job)
@@ -455,9 +459,10 @@ def main():
     print(f"Input: {input_data['text']}")
     print("\nProcessing with CrewAI agents...\n")
     
-    # Initialize and run the crew
-    crew = ResearchCrew(verbose=True)
-    result = crew.crew.kickoff(inputs=input_data)
+    import asyncio
+    
+    # Run the full async execute_crew_task pipeline, rendering video locally!
+    result = asyncio.run(execute_crew_task(input_data["text"]))
     
     # Display the result
     print("\n" + "=" * 70)
