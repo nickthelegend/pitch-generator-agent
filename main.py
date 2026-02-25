@@ -8,6 +8,20 @@ from masumi.config import Config
 from masumi.payment import Payment, Amount
 from crew_definition import ResearchCrew
 from logging_config import setup_logging
+from schemas import (
+    GenerateSlidesRequest,
+    GenerateSlidesResponse,
+    UpdateSlideRequest,
+    UpdateSlideResponse,
+    TTSRequest,
+    TTSResponse,
+    VideoRenderRequest,
+    VideoRenderResponse,
+)
+from slide_generation import generate_slides, update_slide
+from tts_generation import generate_tts, TTSGenerationError
+from video_generation import render_video, VideoGenerationError
+from pinata_client import upload_file as pinata_upload, PinataError
 
 # Configure logging
 logger = setup_logging()
@@ -175,7 +189,7 @@ async def handle_payment_status(job_id: str, payment_id: str) -> None:
         
         # Update job status to running
         jobs[job_id]["status"] = "running"
-        logger.info(f"Input data: {jobs[job_id]["input_data"]}")
+        logger.info(f"Input data: {jobs[job_id]['input_data']}")
 
         # Execute the AI task
         result = await execute_crew_task(jobs[job_id]["input_data"])
@@ -283,6 +297,87 @@ async def input_schema():
             }
         ]
     }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pitch Generator Tools (Slides, TTS, Video)
+# ─────────────────────────────────────────────────────────────────────────────
+@app.post("/tools/slides/generate", response_model=GenerateSlidesResponse)
+async def tools_generate_slides(payload: GenerateSlidesRequest):
+    try:
+        slides = generate_slides(topic=payload.topic, count=payload.count, style=payload.style)
+        return GenerateSlidesResponse(slides=slides)
+    except Exception as e:
+        logger.error(f"Slide generation failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate slides")
+
+
+@app.post("/tools/slides/update", response_model=UpdateSlideResponse)
+async def tools_update_slide(payload: UpdateSlideRequest):
+    try:
+        slide = update_slide(
+            topic=payload.topic,
+            instruction=payload.instruction,
+            current_slide=payload.currentSlide,
+            style=payload.style
+        )
+        return UpdateSlideResponse(slide=slide)
+    except Exception as e:
+        logger.error(f"Slide update failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to update slide")
+
+
+@app.post("/tools/tts", response_model=TTSResponse)
+async def tools_generate_tts(payload: TTSRequest):
+    try:
+        audio = generate_tts(
+            [line.model_dump() for line in payload.script],
+            language=payload.language,
+        )
+        return TTSResponse(audio=audio)
+    except TTSGenerationError as e:
+        logger.error(f"TTS generation failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"TTS generation failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate audio")
+
+
+@app.post("/tools/video/render", response_model=VideoRenderResponse)
+async def tools_render_video(payload: VideoRenderRequest):
+    try:
+        output_dir = os.getenv("MEDIA_DIR", os.path.join(os.getcwd(), "outputs"))
+        video_path, filename = render_video(
+            topic=payload.topic,
+            slides=payload.slides,
+            output_dir=output_dir,
+            format=payload.format,
+            brand=payload.brand,
+            fps=payload.fps,
+            output_format=payload.outputFormat,
+            generate_audio=payload.generateAudio,
+            tts_language=payload.ttsLanguage,
+            tts_provider=payload.ttsProvider,
+            tts_voice=payload.ttsVoice,
+        )
+        ipfs_data = None
+        try:
+            ipfs_data = pinata_upload(video_path, name=filename)
+        except PinataError as e:
+            logger.error(f"Pinata upload failed: {str(e)}", exc_info=True)
+
+        return VideoRenderResponse(
+            videoPath=video_path,
+            videoFilename=filename,
+            ipfsUrl=ipfs_data.get("ipfsUrl") if ipfs_data else None,
+            gatewayUrl=ipfs_data.get("gatewayUrl") if ipfs_data else None,
+            ipfsHash=ipfs_data.get("ipfsHash") if ipfs_data else None,
+        )
+    except VideoGenerationError as e:
+        logger.error(f"Video rendering failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"Video rendering failed: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to render video")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6) Health Check
