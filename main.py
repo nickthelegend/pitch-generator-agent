@@ -112,41 +112,28 @@ async def execute_crew_task(input_data: str) -> str:
         
         logger.info(f"Saving project {project_id} directly to Podio AI...")
         slides_dict_list = [s.model_dump() for s in slides]
-        try:
-            save_project(project_id, topic, slides_dict_list, has_video=True)
-        except Exception as e:
-            logger.warning(f"Failed to save directly to Next.js API (you may need to restart your npm run dev process): {e}")
+        
+        # In production, we expect the Podio AI (Next.js) backend to be reachable
+        save_project(project_id, topic, slides_dict_list, has_video=True)
         
         # 5. Render Video using Remotion and Upload to IPFS via Pinata
         from pinata_client import upload_file as pinata_upload
         from render_remotion import render_remotion_video
-        import json
         
-        try:
-            logger.info("Rendering Remotion video locally...")
-            video_path = render_remotion_video(slides_dict_list, project_id)
-            logger.info("Uploading rendered video to IPFS via Pinata...")
-            ipfs_data = pinata_upload(video_path)
-            ipfs_url = ipfs_data.get("ipfsUrl", "Generation completed, but IPFS missing.")
-        except Exception as video_err:
-            logger.warning(f"Could not render video. Falling back to JSON upload. Error: {video_err}")
-            
-            # Fallback: Upload JSON presentation format to Pinata IPFS
-            output_dir = os.getenv("MEDIA_DIR", os.path.join(os.getcwd(), "outputs"))
-            os.makedirs(output_dir, exist_ok=True)
-            json_path = os.path.join(output_dir, f"{project_id}.json")
-            with open(json_path, "w") as f:
-                json.dump(slides_dict_list, f, indent=4)
-                
-            try:
-                ipfs_data = pinata_upload(json_path)
-                ipfs_url = ipfs_data.get("ipfsUrl", "Generation completed, but IPFS missing.")
-            except Exception as pinata_err:
-                ipfs_url = f"Failed to upload to Pinata: {pinata_err}"
+        logger.info("Rendering Remotion video locally...")
+        video_path = render_remotion_video(slides_dict_list, project_id)
         
-        # 6. Return IPFS Link only
+        logger.info("Uploading rendered video to IPFS via Pinata...")
+        ipfs_data = pinata_upload(video_path)
+        ipfs_url = ipfs_data.get("ipfsUrl", "Generation completed, but IPFS missing.")
+        
+        # 6. Return Deep Link & IPFS Link
+        podio_base = os.getenv("PODIO_AI_BASE_URL", "http://localhost:3002")
+        export_url = f"{podio_base}/project/{project_id}/export"
+        
         final_output = (
             f"Presentation Generated Successfully!\n"
+            f"View and Export your Remotion Video here: {export_url}\n"
             f"IPFS Backup URL (Pinata): {ipfs_url}"
         )
         logger.info("Multimedia pipeline completed.")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import List, Optional, Literal, Dict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 LayoutType = Literal[
     'title',
@@ -39,6 +39,13 @@ class Slide(BaseModel):
     htmlContent: Optional[str] = None
     audioUrl: Optional[str] = None
     duration: Optional[float] = None
+
+    @field_validator('layoutType', mode='before')
+    @classmethod
+    def lowercase_layout_type(cls, v):
+        if isinstance(v, str):
+            return v.lower()
+        return v
 
 
 class GenerateSlidesRequest(BaseModel):
