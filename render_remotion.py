@@ -27,7 +27,9 @@ def render_remotion_video(slides_dict_list, project_id):
         "npx", "remotion", "render", 
         "app/remotion/index.ts", "SlideVideo", 
         output_mp4,
-        "--props", props_path
+        "--props", props_path,
+        "--concurrency", "2",
+        "--gl", "swiftshader"
     ]
     
     try:
