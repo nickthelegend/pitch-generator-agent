@@ -46,17 +46,3 @@ def generate_tts(script: list[dict], language: str = "en-US") -> Dict[str, Any]:
         "script": script,
         "language": language,
     })
-def save_project(project_id: str, topic: str, slides: list[dict], has_video: bool = True) -> Dict[str, Any]:
-    content = {
-        "projectId": project_id,
-        "topic": topic,
-        "style": "Modern",
-        "format": "16:9",
-        "slides": slides,
-        "hasVideo": has_video,
-    }
-    return _post("/api/project/save", {
-        "projectId": project_id,
-        "title": topic,
-        "content": content
-    })

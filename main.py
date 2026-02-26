@@ -105,16 +105,10 @@ async def execute_crew_task(input_data: str) -> str:
                 pause_buffer = 1.5
                 slide.duration = max(5.0, base_duration + pause_buffer)
                 
-        # 4. Save directly into Podio AI database for Remotion playback
+        # 4. Generate a project ID
         import uuid
-        from podio_client import save_project
         project_id = str(uuid.uuid4())
-        
-        logger.info(f"Saving project {project_id} directly to Podio AI...")
         slides_dict_list = [s.model_dump() for s in slides]
-        
-        # In production, we expect the Podio AI (Next.js) backend to be reachable
-        save_project(project_id, topic, slides_dict_list, has_video=True)
         
         # 5. Render Video using Remotion and Upload to IPFS via Pinata
         from pinata_client import upload_file as pinata_upload
@@ -127,13 +121,8 @@ async def execute_crew_task(input_data: str) -> str:
         ipfs_data = pinata_upload(video_path)
         ipfs_url = ipfs_data.get("ipfsUrl", "Generation completed, but IPFS missing.")
         
-        # 6. Return Deep Link & IPFS Link
-        podio_base = os.getenv("PODIO_AI_BASE_URL", "http://localhost:3002")
-        export_url = f"{podio_base}/project/{project_id}/export"
-        
         final_output = (
             f"Presentation Generated Successfully!\n"
-            f"View and Export your Remotion Video here: {export_url}\n"
             f"IPFS Backup URL (Pinata): {ipfs_url}"
         )
         logger.info("Multimedia pipeline completed.")

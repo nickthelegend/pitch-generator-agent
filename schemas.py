@@ -42,10 +42,13 @@ class Slide(BaseModel):
 
     @field_validator('layoutType', mode='before')
     @classmethod
-    def lowercase_layout_type(cls, v):
+    def validate_layout_type(cls, v):
+        valid_types = {'title', 'content', 'quote', 'statistics', 'timeline', 'image', 'comparison', 'conclusion'}
         if isinstance(v, str):
-            return v.lower()
-        return v
+            val = v.lower()
+            if val in valid_types:
+                return val
+        return 'content'
 
 
 class GenerateSlidesRequest(BaseModel):
